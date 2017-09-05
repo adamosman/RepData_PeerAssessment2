@@ -1,0 +1,155 @@
+---
+title: "Impact of Severe Weather Events on Public Health and the Economy"
+author: "Adam Osman"
+date: "9/3/2017"
+output: html_document
+keep_md: true
+---
+
+## Synopsis
+The National Oceanic and Atmospheric Administration's (NOAA) storm database collects information about the types of weather events that occur throughout the United States. Information of these events are cataloged not only based on geography and severity, but it takes into account the extent of the damages related to public health and property. The database was analyzed to interpret which types of weather events were responsible for the most fatalities, injuries, property damage, and crop damage.
+
+## Data Processing
+First, the path is established and any necessary libraries are loaded. Then the dataset is read and stored into the the `storm.raw` variable. 
+```{r Loading Data, cache=TRUE}
+# Sets the working directory 
+setwd("~/Desktop/Coursera/RepData_PeerAssessment2/")
+
+# Reads the CSV file into a dataframe called storm.raw
+storm.raw <- read.csv("repdata%2Fdata%2FStormData.csv")
+```
+
+Next, the data is gathered to focus on the effects each weather event has on the public health. The original data set has information for both fatalities and injuries incurred by the weather events, so we will collect the sum total for each type based on the type of weather event.
+
+```{r Gathering The Totals, message=FALSE}
+# The number of fatalities and injuries are added together for each entry and stored in new column labeled PUBLIC.HEALTH
+library(dplyr)
+storm.raw$PUBLIC.HEALTH <- storm.raw$FATALITIES + storm.raw$INJURIES
+storm.health <- storm.raw[,c("EVTYPE","PUBLIC.HEALTH")]
+
+# Removes any entries with values equal to 0
+storm.health <- storm.health[storm.health$PUBLIC.HEALTH != 0, ]
+
+# The sum total of fatalities and injuries for each weather event are calculated and combined into the storm.health.total object 
+storm.health.total <- aggregate(PUBLIC.HEALTH ~ EVTYPE,
+                                data = storm.health,
+                                FUN = sum,
+                                na.rm = TRUE)
+
+# Sorts the events with the highest impact on public health in descending order and stores entries larger than 1000 
+storm.health.total <- arrange(storm.health.total,desc(PUBLIC.HEALTH))
+storm.health.total <- storm.health.total[storm.health.total$PUBLIC.HEALTH > 1000, ]
+```
+
+Some of the redundant are combined and then sorted in descending order. The top 5 most disasterous events are kept. 
+```{r Sorting, message=FALSE}
+# Combines the Heat events
+storm.health.total[2,2] <- storm.health.total[2,2] + storm.health.total[6,2]
+
+# Combines the Thunderstorm Wind events
+storm.health.total[3,2] <- storm.health.total[3,2] + storm.health.total[9,2]
+
+# Combines the Flood events
+storm.health.total[4,2] <- storm.health.total[4,2] + storm.health.total[7,2]
+
+# Renames some of the event type names
+storm.health.total$EVTYPE[c(2,3)] <- c("HEAT", "THUNDERSTORM WIND")
+
+# Sorts the entries in descending order based on PUBLIC.HEALTH
+storm.health.total <- arrange(storm.health.total,desc(PUBLIC.HEALTH))
+
+# Takes the top 5 most costly events
+storm.health.total <- storm.health.total[1:5,]
+
+```
+
+Preview of `storm.total.health`:
+```{r Public Health Preview, echo=FALSE}
+storm.health.total
+```
+
+Next the property and crop damage data is processed:
+```{r Monetary Damages}
+# Converts the monetary exponents to lower-case characters 
+storm.raw$PROPDMGEXP <- tolower(as.character(storm.raw$PROPDMGEXP))
+storm.raw$CROPDMGEXP <- tolower(as.character(storm.raw$CROPDMGEXP))
+
+# Removes entries that do not have the monetary identifier assocaited with property and crop damage entries
+storm.damages <- storm.raw[storm.raw$PROPDMGEXP %in% c("k", "m", "b"), ]
+storm.damages <- storm.raw[storm.raw$CROPDMGEXP %in% c("k", "m", "b"), ]
+
+# Maps the property and crop damage values from thousands and millions to the billions scale
+storm.damages$PROPDMG <- ifelse(storm.damages$PROPDMGEXP == "k", storm.damages$PROPDMG/1000000, storm.damages$PROPDMG)
+storm.damages$PROPDMG <- ifelse(storm.damages$PROPDMGEXP == "m", storm.damages$PROPDMG/1000, storm.damages$PROPDMG)
+
+storm.damages$CROPDMG <- ifelse(storm.damages$CROPDMGEXP == "k", storm.damages$CROPDMG/1000000, storm.damages$CROPDMG)
+storm.damages$CROPDMG <- ifelse(storm.damages$CROPDMGEXP == "m", storm.damages$CROPDMG/1000, storm.damages$CROPDMG)
+
+# Combines the property and crop damage values 
+storm.damages$DAMAGES.TOTAL <- storm.damages$PROPDMG + storm.damages$CROPDMG
+```
+
+Next the total economic damage is subsetted by the sum total of monetary damage for each weather event
+```{r Total Damages}
+# A new dataframe is created containing the total monetary damages for every observation
+storm.damages.total <- storm.damages[, c("EVTYPE", "DAMAGES.TOTAL")]
+storm.damages.total$EVTYPE <- as.character(storm.damages.total$EVTYPE)
+
+# The total monetary damages are totaled for each weather event and only daamges greater than 10 billion are saved
+storm.damages.total <- aggregate(DAMAGES.TOTAL ~ EVTYPE,
+                                 data = storm.damages.total,
+                                 FUN = sum,
+                                 na.rm = TRUE)
+storm.damages.total <- arrange(storm.damages.total,desc(DAMAGES.TOTAL))
+storm.damages.total <- storm.damages.total[storm.damages.total$DAMAGES.TOTAL > 10, ]
+
+# Combines the Flood events
+storm.damages.total[1,2] <- storm.damages.total[1,2] + storm.damages.total[2,2] + storm.damages.total[10,2]
+storm.damages.total[2,2] <- NA
+storm.damages.total[10,2] <- NA
+
+# Combines Ice Storm and Hail
+storm.damages.total[4,2] <- storm.damages.total[4,2] + storm.damages.total[5,2]
+storm.damages.total[5,2] <- NA
+storm.damages.total$EVTYPE[4] <- "ICE STORM/HAIL"
+
+# Sorts the events in descending order based on total monetary damage
+storm.damages.total <- arrange(na.omit(storm.damages.total),desc(DAMAGES.TOTAL))
+```
+
+Preview of the `storm.damages.total`:
+```{r Monetary Damages Preview, echo = FALSE}
+storm.damages.total
+```
+
+## Results
+The most disasterous events to the public health were found to be the result of tornadoes, heat and flooding. The chart below helps illustrate the magnitude of human injury/death for each weather event:
+
+```{r Public Health Chart}
+# Removes any scientific notation from the chart
+options(scipen=5)
+# Adjusts the margins for the chart
+par(mar=c(5,11,2,3))
+barplot(storm.health.total$PUBLIC.HEALTH,
+        names.arg = head(storm.health.total$EVTYPE),
+        horiz = TRUE,
+        col = "red",
+        las = 1,
+        xlim = c(0,100000),
+        xlab = "Amount of Human Fatalities and Injuries",
+        main = "Most Harmful Weather Events on Public Health")
+```
+
+With regards to economic impacts, the most disasterous weather events were related to flooding, ice storms/hail, and tornadoes. The chart below helps illustrate the level of economic damage of the most impactful weather events:
+```{r Monetary Damage Chart}
+# Adjusts the margins for the chart
+par(mar=c(5,12,2,3))
+barplot(storm.damages.total$DAMAGES.TOTAL,
+        names.arg = storm.damages.total$EVTYPE,
+        horiz = TRUE,
+        col = "blue",
+        las = 1,
+        xlim = c(0,300),
+        xlab = "Dollar Amount of Damage (in Billions)",
+        main = "Most Impactful Weather Events on the Economy")
+```
